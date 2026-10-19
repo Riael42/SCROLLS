@@ -260,47 +260,127 @@ function renderTeam(side, containerId, isPlayer) {
 
         const port = document.createElement('div');
         port.className = 'portrait' + (!c.alive ? ' dead' : '');
+        
+        const shieldAmt = c.shields.reduce((sum, s) => sum + s.amount, 0);
+        const hpPct = (c.hp / c.hp_max) * 100;
+        const shieldPct = (shieldAmt / c.hp_max) * 100;
+        
         port.innerHTML = `
             <div class="name">${c.name}</div>
-            <div class="hp">${c.hp} / ${c.hp_max}</div>
+            <div class="hp-bar-container">
+                <div class="hp-bar-fill" style="width: ${hpPct}%"></div>
+                <div class="shield-bar-fill" style="width: ${shieldPct}%"></div>
+                <div class="hp-text">${c.hp}${shieldAmt > 0 ? ` (+${shieldAmt})` : ''} / ${c.hp_max}</div>
+            </div>
             ${c.acted && c.alive ? '<div class="acted-badge">ACTED</div>' : ''}
         `;
-        
+
+        // 1. PERMANENT CLICK HANDLER
         port.onclick = () => {
-            let html = `<strong>${c.name}</strong> (${c.hp}/${c.hp_max} HP)<br>`;
-            if (!c.alive) html += `<em style="color:#f44">DEAD</em><br>`;
-            const rosterData = state.roster.find(r => r.name === c.name);
-            if (rosterData) html += `<span style="color:#6aa8ff"><b>${rosterData.passiveName}</b></span>: ${rosterData.passiveDesc}<br><br>`;
-            
-            const statuses = renderStatusIcons(c);
-            if (statuses) html += `Status: ${statuses}<br><br>`;
-            
             if (state.selectedAbility) {
+                // Try to cast
                 const ab = state.selectedAbility;
                 const isValid = state.module.ccall('sw_can_target', 'number',
                     ['number','number','number','number','number'],
                     [ab.side, ab.charIdx, ab.slotIdx, side, i]);
-                if (isValid) html += `<em style="color:#6aa8ff; display:block; margin-top:0.5em;">Click again to cast ${ab.abilityObj.name} on this target.</em>`;
-            }
-            document.getElementById('combat-info').innerHTML = `<div class="content">${html}</div>`;
-            
-            if (state.selectedAbility) {
-                const ab = state.selectedAbility;
-                const isValid = state.module.ccall('sw_can_target', 'number',
-                    ['number','number','number','number','number'],
-                    [ab.side, ab.charIdx, ab.slotIdx, side, i]);
+                    
                 if (isValid) {
                     const ok = state.module.ccall('sw_cast', 'number', 
                         ['number','number','number','number','number'], 
                         [ab.side, ab.charIdx, ab.slotIdx, side, i]);
                     if (ok) {
-                        document.getElementById('combat-info').innerHTML = `<div class="content"><strong style="color:#6aa8ff">${ab.abilityObj.name} cast!</strong></div>`;
+                        document.getElementById('combat-info').innerHTML = `
+                            <div class="content">
+                                <strong style="color:#6aa8ff">${ab.abilityObj.name} cast!</strong>
+                            </div>
+                        `;
                         state.selectedAbility = null;
                         updateCombatUI();
+                    } else {
+                        port.style.borderColor = 'red';
+                        setTimeout(() => port.style.borderColor = '', 300);
                     }
+                    return;
                 }
             }
+            
+            // Otherwise, inspect the character
+            let html = `<strong>${c.name}</strong> (${c.hp}/${c.hp_max} HP)<br>`;
+            if (!c.alive) html += `<em style="color:#f44">DEAD</em><br>`;
+            const rosterData = state.roster.find(r => r.name === c.name);
+            if (rosterData) html += `<span style="color:#6aa8ff"><b>${rosterData.passiveName}</b></span>: ${rosterData.passiveDesc}<br><br>`;
+            const statuses = renderStatusIcons(c);
+            if (statuses) html += `Status: ${statuses}<br><br>`;
+            document.getElementById('combat-info').innerHTML = `<div class="content">${html}</div>`;
         };
+
+        // 2. HOVER PREVIEW (Only if an ability is selected)
+        if (state.selectedAbility) {
+            const ab = state.selectedAbility;
+            const isValid = state.module.ccall('sw_can_target', 'number',
+                ['number','number','number','number','number'],
+                [ab.side, ab.charIdx, ab.slotIdx, side, i]);
+                
+            if (isValid) {
+                port.classList.add('targetable');
+                
+                port.onmouseenter = () => {
+                    const dmg = state.module.ccall('sw_preview_damage', 'number', 
+                        ['number','number','number'], [ab.side, ab.charIdx, ab.slotIdx]);
+                    
+                    if (dmg > 0) {
+                        const shieldDmg = Math.min(dmg, shieldAmt);
+                        const hpDmg = dmg - shieldDmg;
+                        
+                        let previewText = `<strong style="color:#f88">${dmg} Damage</strong>`;
+                        if (shieldAmt > 0) previewText += ` (${shieldDmg} to Shield, ${hpDmg} to HP)`;
+                        else previewText += ` (${hpDmg} to HP)`;
+                        if (hpDmg >= c.hp) previewText += ` <span style="color:#f44">LETHAL</span>`;
+                        
+                        document.getElementById('combat-info').innerHTML = `
+                            <div class="content">
+                                <strong>${ab.abilityObj.name}</strong> → <strong>${c.name}</strong><br>
+                                ${previewText}
+                            </div>
+                        `;
+
+                        // Visual Bar Preview
+                        const hpBar = port.querySelector('.hp-bar-fill');
+                        const shieldBar = port.querySelector('.shield-bar-fill');
+                        const hpText = port.querySelector('.hp-text');
+
+                        const newShieldAmt = shieldAmt - shieldDmg;
+                        const newHpAmt = Math.max(0, c.hp - hpDmg);
+
+                        const newShieldPct = (newShieldAmt / c.hp_max) * 100;
+                        const newHpPct = (newHpAmt / c.hp_max) * 100;
+
+                        if (hpBar) hpBar.style.width = `${newHpPct}%`;
+                        if (shieldBar) shieldBar.style.width = `${newShieldPct}%`;
+                        if (hpText) hpText.textContent = `${newHpAmt}${newShieldAmt > 0 ? ` (+${newShieldAmt})` : ''} / ${c.hp_max}`;
+                    }
+                };
+                
+                port.onmouseleave = () => {
+                    document.getElementById('combat-info').innerHTML = `
+                        <div class="content">
+                            <strong>${ab.abilityObj.name}</strong><br>
+                            Cost: ${fmtCost(ab.abilityObj.cost)} | CD: ${ab.abilityObj.cd_max}<br>
+                            <em style="color:#6aa8ff">Click a highlighted target to cast.</em>
+                        </div>
+                    `;
+
+                    // Restore Bars
+                    const hpBar = port.querySelector('.hp-bar-fill');
+                    const shieldBar = port.querySelector('.shield-bar-fill');
+                    const hpText = port.querySelector('.hp-text');
+
+                    if (hpBar) hpBar.style.width = `${hpPct}%`;
+                    if (shieldBar) shieldBar.style.width = `${shieldPct}%`;
+                    if (hpText) hpText.textContent = `${c.hp}${shieldAmt > 0 ? ` (+${shieldAmt})` : ''} / ${c.hp_max}`;
+                };
+            }
+        }
 
         let isGuarded = false;
         for (let k = 0; k < 3; k++) {
