@@ -26,6 +26,17 @@
                 <option value="10">10 — Master</option>
             </select>
         </div>
+        <div class="difficulty" style="margin-left: 1em;">
+            <label for="enemy-comp">Enemy:</label>
+            <select id="enemy-comp">
+                <option value="random" selected>Random</option>
+                <option value="meta1">Surv + Archer + Sentinel</option>
+                <option value="meta2">Wolf + SC + Golem</option>
+                <option value="meta3">MG + Golem + Charm</option>
+                <option value="meta4">Corp + Charm + Wolf</option>
+                <option value="meta5">Lockaff + Archer + Cub</option>
+            </select>
+        </div>
         <button id="btn-patch-notes">Patch Notes</button>
         <button id="btn-clear">Clear</button>
         <button id="btn-start" class="primary" disabled>Start Fight</button>
@@ -177,18 +188,38 @@ function toggleSelect(id) {
 function startFight() {
     const M = state.module;
     const [p1a, p1b, p1c] = state.selected;
-    const pool = [];
-    for (let i = 0; i < M.ccall('sw_roster_size', 'number', [], []); i++) {
-        const isFiller = M.ccall('sw_roster_is_filler', 'number', ['number'], [i]);
-        if (!isFiller && !state.selected.includes(i)) pool.push(i);
+    let p2a, p2b, p2c;
+    
+    const comp = document.getElementById('enemy-comp').value;
+    if (comp === 'random') {
+        const pool = [];
+        for (let i = 0; i < M.ccall('sw_roster_size', 'number', [], []); i++) {
+            const isFiller = M.ccall('sw_roster_is_filler', 'number', ['number'], [i]);
+            if (!isFiller && !state.selected.includes(i)) pool.push(i);
+        }
+        for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        [p2a, p2b, p2c] = pool.slice(0, 3);
+    } else {
+        // Helper to find ID by name
+        const getId = (name) => state.roster.find(r => r.name.includes(name)).id;
+        
+        if (comp === 'meta1') {
+            p2a = getId('Survivalist'); p2b = getId('Archer'); p2c = getId('Sentinel');
+        } else if (comp === 'meta2') {
+            p2a = getId('Wolf'); p2b = getId('SoulCollector'); p2c = getId('Golemancer');
+        } else if (comp === 'meta3') {
+            p2a = getId('MrManaGuardian'); p2b = getId('Golemancer'); p2c = getId('Charmist');
+        } else if (comp === 'meta4') {
+            p2a = getId('Corporal'); p2b = getId('Charmist'); p2c = getId('Wolf');
+        } else if (comp === 'meta5') {
+            p2a = getId('Lockaff'); p2b = getId('Archer'); p2c = getId('Cub');
+        }
     }
-    for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-    const [p2a, p2b, p2c] = pool.slice(0, 3);
-    const tier = parseInt(document.getElementById('difficulty').value, 10);
 
+    const tier = parseInt(document.getElementById('difficulty').value, 10);
     M.ccall('sw_new_match', 'number', ['number','number','number','number','number','number','number'], [p1a, p1b, p1c, p2a, p2b, p2c, tier]);
     
     document.getElementById('screen-select').classList.add('hidden');
