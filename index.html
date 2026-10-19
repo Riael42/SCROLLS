@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scrolls — Alpha</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="screen-select" class="screen">
+    <h1>Scrolls — Alpha</h1>
+    <h2>Pick 3 characters</h2>
+
+    <div class="filter-row" id="filter-row"></div>
+    <div class="char-grid" id="char-grid"></div>
+
+    <div class="controls">
+        <span class="selected-count" id="selected-count">0 / 3 selected</span>
+        <div class="difficulty">
+            <label for="difficulty">AI:</label>
+            <select id="difficulty">
+                <option value="1">1 — Easy</option>
+                <option value="3">3 — Casual</option>
+                <option value="5" selected>5 — Standard</option>
+                <option value="7">7 — Hard</option>
+                <option value="10">10 — Master</option>
+            </select>
+        </div>
+        <button id="btn-clear">Clear</button>
+        <button id="btn-start" class="primary" disabled>Start Fight</button>
+    </div>
+</div>
+
+<div id="screen-combat" class="screen hidden">
+    <div class="top-bar">
+        <div id="combat-turn">Turn 1</div>
+        <div class="energy-pool" id="energy-player">YOU: -</div>
+        <div class="energy-pool" id="energy-enemy">ENEMY: -</div>
+    </div>
+    
+    <div class="combat-main">
+        <div class="team-column player" id="team-player"></div>
+        <div class="team-column enemy" id="team-enemy"></div>
+    </div>
+    
+    <div class="info-panel" id="combat-info">
+        <div class="content">Select an ability to see details.</div>
+    </div>
+    
+    <div class="combat-controls">
+        <button id="btn-end-turn" class="primary">End Turn</button>
+    </div>
+
+    <div id="end-screen" class="hidden">
+        <div id="end-title" class="end-title victory">VICTORY</div>
+        <button id="btn-restart" class="end-btn">Return to Select</button>
+    </div>
+</div>
+
+<script src="build/scrolls.js"></script>
+<script>
+const FILLER_IDS = new Set([11, 12]);
+const ROLE_NAMES = ['Burst', 'Sustain', 'Control', 'Tank', 'Support', 'Flex'];
+const ENERGY_NAMES = ['VIT', 'STR', 'INT', 'WIS', 'ESS'];
+
+const state = {
+    module: null,
+    roster: [],
+    selected: [],
+    roleFilter: -1,
+    matchActive: false,
+    selectedAbility: null,
+};
+
+window.showInfo = (msg) => {
+    document.getElementById('combat-info').innerHTML = `<div class="content"><strong>${msg}</strong></div>`;
+};
+
+function fmtCost(costArray) {
+    const parts = [];
+    for (let i = 0; i < 5; i++) if (costArray[i] > 0) parts.push(`${ENERGY_NAMES[i]}:${costArray[i]}`);
+    return parts.join(' ') || 'free';
+}
+
+function costsOffColor(costArray, teamEnergy) {
+    let offColor = false;
+    for (let i = 0; i < 4; i++) {
+        if (teamEnergy[i] < costArray[i]) offColor = true;
+    }
+    if (costArray[4] > 0) offColor = true; // Needs generic energy
+    return offColor;
+}
+
+async function buildRoster() {
+    const M = state.module;
+    const size = M.ccall('sw_roster_size', 'number', [], []);
+    for (let i = 0; i < size; i++) {
+        if (FILLER_IDS.has(i)) continue;
+        const name = M.ccall('sw_roster_name', 'string', ['number'], [i]);
+        const hp = M.ccall('sw_roster_hp', 'number', ['number'], [i]);
+        const role = M.ccall('sw_roster_role', 'number', ['number'], [i]);
+        const flavor = M.ccall('sw_roster_flavor', 'number', ['number'], [i]);
+        const flavorName = M.ccall('sw_flavor_name', 'string', ['number'], [flavor]);
+        
+        let passiveName = "None";
+        let passiveDesc = "No passive.";
+        try {
+            passiveName = M.ccall('sw_roster_passive_name', 'string', ['number'], [i]);
+            passiveDesc = M.ccall('sw_roster_passive_desc', 'string', ['number'], [i]);
+        } catch(e) { console.warn("Missing passive exports in WASM"); }
+
+        const abCount = M.ccall('sw_roster_ability_count', 'number', ['number'], [i]);
+        const abilities = [];
+        for (let s = 0; s < abCount; s++) {
+            const aname = M.ccall('sw_roster_ability_name', 'string', ['number','number'], [i, s]);
+            const adesc = M.ccall('sw_roster_ability_desc', 'string', ['number','number'], [i, s]);
+            const costs = [];
+            for (let c = 0; c < 5; c++) costs.push(M.ccall('sw_roster_ability_cost', 'number', ['number','number','number'], [i, s, c]));
+            const cd = M.ccall('sw_roster_ability_cd', 'number', ['number','number'], [i, s]);
+            abilities.push({ name: aname, desc: adesc, cost: costs, cd });
+        }
+        state.roster.push({ id: i, name, hp, role, flavor, flavorName, abilities, passiveName, passiveDesc });
+    }
+}
+
+function renderFilterRow() {
+    const row = document.getElementById('filter-row');
+    row.innerHTML = '';
+    const all = document.createElement('button');
+    all.className = 'filter-btn' + (state.roleFilter === -1 ? ' active' : '');
+    all.textContent = 'All';
+    all.onclick = () => { state.roleFilter = -1; renderFilterRow(); renderGrid(); };
+    row.appendChild(all);
+    for (let r = 0; r < 6; r++) {
+        const btn = document.createElement('button');
+        btn.className = 'filter-btn' + (state.roleFilter === r ? ' active' : '');
+        btn.textContent = ROLE_NAMES[r];
+        btn.onclick = () => { state.roleFilter = r; renderFilterRow(); renderGrid(); };
+        row.appendChild(btn);
+    }
+}
+
+function renderGrid() {
+    const grid = document.getElementById('char-grid');
+    grid.innerHTML = '';
+    for (const ch of state.roster) {
+        const card = document.createElement('div');
+        card.className = 'char-card';
+        if (state.selected.includes(ch.id)) card.classList.add('selected');
+        if (state.roleFilter !== -1 && ch.role !== state.roleFilter) card.classList.add('filtered');
+        card.onclick = () => toggleSelect(ch.id);
+
+        const abilitiesHtml = ch.abilities.map(a =>
+            `<div class="ability"><span>${a.name}</span><span class="cost">${fmtCost(a.cost)}</span></div>`
+        ).join('');
+
+        card.innerHTML = `
+            <div class="char-name">${ch.name}</div>
+            <div class="char-badges">${ROLE_NAMES[ch.role]} · ${ch.flavorName}</div>
+            <div class="char-hp">${ch.hp} HP</div>
+            <div class="char-abilities">${abilitiesHtml}</div>
+        `;
+        grid.appendChild(card);
+    }
+}
+
+function toggleSelect(id) {
+    const idx = state.selected.indexOf(id);
+    if (idx >= 0) state.selected.splice(idx, 1);
+    else if (state.selected.length < 3) state.selected.push(id);
+    document.getElementById('selected-count').textContent = `${state.selected.length} / 3 selected`;
+    document.getElementById('btn-start').disabled = state.selected.length !== 3;
+    renderGrid();
+}
+
+function startFight() {
+    const M = state.module;
+    const [p1a, p1b, p1c] = state.selected;
+    const pool = [];
+    for (let i = 0; i < M.ccall('sw_roster_size', 'number', [], []); i++) {
+        if (!FILLER_IDS.has(i) && !state.selected.includes(i)) pool.push(i);
+    }
+    for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const [p2a, p2b, p2c] = pool.slice(0, 3);
+    const tier = parseInt(document.getElementById('difficulty').value, 10);
+
+    M.ccall('sw_new_match', 'number', ['number','number','number','number','number','number','number'], [p1a, p1b, p1c, p2a, p2b, p2c, tier]);
+    
+    document.getElementById('screen-select').classList.add('hidden');
+    document.getElementById('screen-combat').classList.remove('hidden');
+    document.getElementById('end-screen').classList.add('hidden');
+    state.matchActive = true;
+    state.selectedAbility = null;
+    document.getElementById('combat-info').innerHTML = `<div class="content">Select an ability to see details.</div>`;
+    updateCombatUI();
+}
+
+function renderStatusIcons(c) {
+    let icons = [];
+    if (c.invuln_turns > 0) icons.push(`INV(${c.invuln_turns})`);
+    if (c.stun_turns > 0) icons.push(`STUN(${c.stun_turns})`);
+    if (c.charm_stacks > 0) icons.push(`CHM:${c.charm_stacks}`);
+    if (c.aiming_turns > 0) icons.push(`AIM:${c.aiming_turns}`);
+    if (c.sigils > 0) icons.push(`SIG:${c.sigils}`);
+    if (c.ammo > 0) icons.push(`AMM:${c.ammo}`);
+    if (c.golem_hp > 0) icons.push(`GLM:${c.golem_hp}`);
+    if (c.soul_mark_turns > 0) icons.push(`MRK:${c.soul_mark_turns}`);
+    if (c.trap_turns > 0) icons.push(`TRP`);
+    if (c.stance >= 0) icons.push(c.stance === 0 ? 'ATK' : 'DEF');
+    return icons.join(' ');
+}
+
+function renderTeam(side, containerId, isPlayer) {
+    const json = state.module.ccall('sw_state_json', 'string', [], []);
+    const s = JSON.parse(json);
+    const team = s.teams[side];
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+
+    for (let i = 0; i < 3; i++) {
+        const c = team.chars[i];
+        const row = document.createElement('div');
+        row.className = 'char-row';
+
+        const port = document.createElement('div');
+        port.className = 'portrait' + (!c.alive ? ' dead' : '');
+        port.innerHTML = `
+            <div class="name">${c.name}</div>
+            <div class="hp">${c.hp} / ${c.hp_max}</div>
+            ${c.acted && c.alive ? '<div class="acted-badge">ACTED</div>' : ''}
+        `;
+        
+        port.onclick = () => {
+            let html = `<strong>${c.name}</strong> (${c.hp}/${c.hp_max} HP)<br>`;
+            if (!c.alive) html += `<em style="color:#f44">DEAD</em><br>`;
+            const rosterData = state.roster.find(r => r.name === c.name);
+            if (rosterData) html += `<span style="color:#6aa8ff"><b>${rosterData.passiveName}</b></span>: ${rosterData.passiveDesc}<br><br>`;
+            
+            const statuses = renderStatusIcons(c);
+            if (statuses) html += `Status: ${statuses}<br><br>`;
+            
+            if (state.selectedAbility) {
+                const ab = state.selectedAbility;
+                const isValid = state.module.ccall('sw_can_target', 'number',
+                    ['number','number','number','number','number'],
+                    [ab.side, ab.charIdx, ab.slotIdx, side, i]);
+                if (isValid) html += `<em style="color:#6aa8ff; display:block; margin-top:0.5em;">Click again to cast ${ab.abilityObj.name} on this target.</em>`;
+            }
+            document.getElementById('combat-info').innerHTML = `<div class="content">${html}</div>`;
+            
+            if (state.selectedAbility) {
+                const ab = state.selectedAbility;
+                const isValid = state.module.ccall('sw_can_target', 'number',
+                    ['number','number','number','number','number'],
+                    [ab.side, ab.charIdx, ab.slotIdx, side, i]);
+                if (isValid) {
+                    const ok = state.module.ccall('sw_cast', 'number', 
+                        ['number','number','number','number','number'], 
+                        [ab.side, ab.charIdx, ab.slotIdx, side, i]);
+                    if (ok) {
+                        document.getElementById('combat-info').innerHTML = `<div class="content"><strong style="color:#6aa8ff">${ab.abilityObj.name} cast!</strong></div>`;
+                        state.selectedAbility = null;
+                        updateCombatUI();
+                    }
+                }
+            }
+        };
+
+        let isGuarded = false;
+        for (let k = 0; k < 3; k++) {
+            const g = team.chars[k];
+            if (g.alive && g.golem_hp > 0 && g.golem_assigned_side === side && g.golem_assigned_idx === i) {
+                isGuarded = true; break;
+            }
+        }
+
+        let dotDetails = [];
+        if (c.dots) {
+            c.dots.forEach(d => {
+                let srcName = "Unknown";
+                // Find source in either team
+                for (let sideIdx = 0; sideIdx < 2; sideIdx++) {
+                    const found = s.teams[sideIdx].chars.find(ch => ch.id === d.source);
+                    if (found) { srcName = found.name; break; }
+                }
+                dotDetails.push(`${d.dmg} dmg/turn (${d.turns}t left) from ${srcName}`);
+            });
+        }
+
+        const badgesHtml = [];
+        const addBadge = (cls, text, title) => {
+            badgesHtml.push(`<div class="badge ${cls}" title="${title}" onclick="showInfo('${text}: ${title}')">${text}</div>`);
+        };
+
+        if (isGuarded) addBadge('badge-golem', 'G', 'Guarded by Golem');
+        if (c.invuln_turns > 0) addBadge('badge-invuln', 'I', 'Invulnerable');
+        if (c.stun_turns > 0) addBadge('badge-stun', 'S', 'Stunned');
+        if (c.dots.length > 0) {
+            const titleStr = dotDetails.join(" | ");
+            addBadge('badge-dot', 'D', titleStr);
+        }
+        if (c.hots.length > 0) addBadge('badge-hot', 'H', 'Healing over Time');
+        if (c.shields.length > 0) addBadge('badge-shield', 'Sh', `Shields: ${c.shields.reduce((sum, s) => sum + s.amount, 0)} HP`);
+        if (c.charm_stacks > 0) addBadge('badge-charm', c.charm_stacks, 'Charms');
+        if (c.aiming_turns > 0) addBadge('badge-aim', c.aiming_turns, 'Taking Aim');
+        if (c.sigils > 0) addBadge('badge-sigil', c.sigils, 'Ritual Sigils');
+        if (c.ammo > 0) addBadge('badge-ammo', c.ammo, 'Ammo');
+        if (c.golem_hp > 0) addBadge('badge-golem', c.golem_hp, 'Golem HP');
+        if (c.marks && c.marks.length > 0) addBadge('badge-mark', 'M', 'Marked for Execution');
+        if (c.soul_mark_turns > 0) addBadge('badge-mark', c.soul_mark_turns, 'Soul Marked');
+        if (c.trap_turns > 0) addBadge('badge-trap', 'T', 'Trap Active');
+        if (c.stance >= 0) addBadge('badge-stance', c.stance === 0 ? 'A' : 'D', c.stance === 0 ? 'Assault Stance' : 'Defensive Stance');
+
+        const abilities = [];
+        for (let sIdx = 0; sIdx < c.abilities.length; sIdx++) {
+            if (c.abilities[sIdx]) abilities.push({ ...c.abilities[sIdx], slotIdx: sIdx });
+        }
+        const renderSlots = isPlayer ? [...abilities].reverse() : abilities;
+
+        const abCont = document.createElement('div');
+        abCont.className = 'abilities-container';
+
+        for (const ab of renderSlots) {
+            const origIdx = ab.slotIdx;
+            const slotDiv = document.createElement('div');
+            slotDiv.className = 'ability-slot';
+
+            const isCastable = isPlayer && s.active === 0 && c.alive && !c.acted && 
+                state.module.ccall('sw_can_cast', 'number', ['number','number','number'], [side, i, origIdx]);
+            
+            let warningHtml = '';
+            if (isCastable && costsOffColor(ab.cost, s.teams[side].energy)) {
+                warningHtml = `<div style="color:#fa4; font-size:0.8em; margin-top:0.2em;" title="Will consume off-color energy or Essence">⚠️</div>`;
+            }
+            
+            if (!isCastable && isPlayer) slotDiv.classList.add('disabled');
+            
+            let abName = ab.name;
+            if (c.ammo === 0 && ab.name === "Las-Rifle Volley") abName = "Reload";
+            if (c.aiming_turns > 0 && ab.name === "Forking Arrow") abName = "Big Forking Arrow";
+            if (c.sigils >= 3 && ab.name === "Inscribe") abName = "Release";
+
+            slotDiv.innerHTML = `
+                <div class="ab-name">${abName}</div>
+                <div class="ab-cost">${fmtCost(ab.cost)}</div>
+                ${warningHtml}
+                ${ab.cd_left > 0 ? `<div class="ab-cd">CD:${ab.cd_left}</div>` : ''}
+            `;
+
+            slotDiv.onclick = (e) => {
+                e.stopPropagation();
+                if (isCastable) {
+                    state.selectedAbility = { side, charIdx: i, slotIdx: origIdx, abilityObj: ab };
+                }
+                const rosterData = state.roster.find(r => r.name === c.name);
+                const rAb = rosterData ? rosterData.abilities.find(a => a.name === ab.name) : null;
+                const desc = rAb && rAb.desc ? rAb.desc : "No description.";
+                
+                document.getElementById('combat-info').innerHTML = `
+                    <div class="content">
+                        <strong>${abName}</strong><br>
+                        Cost: ${fmtCost(ab.cost)} | CD: ${ab.cd_max}<br>
+                        <span style="color:#ccc">${desc}</span><br>
+                        ${isCastable ? '<em style="color:#6aa8ff">Click a highlighted target to cast.</em>' : ''}
+                    </div>
+                `;
+                updateCombatUI();
+            };
+            abCont.appendChild(slotDiv);
+        }
+
+        const abWrapper = document.createElement('div');
+        abWrapper.style.display = 'flex';
+        abWrapper.style.flexDirection = 'column';
+        abWrapper.style.alignItems = isPlayer ? 'flex-start' : 'flex-end';
+        abWrapper.appendChild(abCont);
+        
+        if (badgesHtml.length > 0) {
+            const badgeContainer = document.createElement('div');
+            badgeContainer.className = 'status-badges';
+            badgeContainer.innerHTML = badgesHtml.join('');
+            abWrapper.appendChild(badgeContainer);
+        }
+
+        if (isPlayer) {
+            row.appendChild(port);
+            row.appendChild(abWrapper);
+        } else {
+            row.appendChild(abWrapper);
+            row.appendChild(port);
+        }
+        container.appendChild(row);
+    }
+}
+
+function updateCombatUI() {
+    const json = state.module.ccall('sw_state_json', 'string', [], []);
+    const s = JSON.parse(json);
+
+    document.getElementById('combat-turn').textContent = `Turn ${s.turn} - ${s.active === 0 ? 'Your Turn' : 'Enemy Turn'}`;
+    
+    const eP = s.teams[0].energy;
+    const eE = s.teams[1].energy;
+    document.getElementById('energy-player').innerHTML = `<span>YOU:</span> ${ENERGY_NAMES.map((n, i) => `${n}:${eP[i]}`).join(' ')}`;
+    document.getElementById('energy-enemy').innerHTML = `<span>ENEMY:</span> ${ENERGY_NAMES.map((n, i) => `${n}:${eE[i]}`).join(' ')}`;
+
+    renderTeam(0, 'team-player', true);
+    renderTeam(1, 'team-enemy', false);
+
+    if (s.winner >= 0) {
+        const endScreen = document.getElementById('end-screen');
+        const endTitle = document.getElementById('end-title');
+        endScreen.classList.remove('hidden');
+        endTitle.textContent = s.winner === 0 ? 'VICTORY!' : 'DEFEAT...';
+        endTitle.className = 'end-title ' + (s.winner === 0 ? 'victory' : 'defeat');
+        document.getElementById('btn-end-turn').disabled = true;
+        return;
+    }
+
+    const endBtn = document.getElementById('btn-end-turn');
+    if (s.active === 0) {
+        endBtn.disabled = false;
+        endBtn.textContent = 'End Turn';
+    } else {
+        endBtn.disabled = true;
+        endBtn.textContent = 'Enemy Thinking...';
+        setTimeout(() => {
+            state.module.ccall('sw_ai_turn', 'number', [], []);
+            updateCombatUI();
+        }, 800);
+    }
+}
+
+function endTurn() {
+    state.selectedAbility = null;
+    document.getElementById('combat-info').innerHTML = `<div class="content">Select an ability to see details.</div>`;
+    state.module.ccall('sw_end_turn', 'number', [], []);
+    updateCombatUI();
+}
+
+(async () => {
+    try {
+        const M = await createScrollsModule();
+        M.ccall('sw_init', null, [], []);
+        state.module = M;
+        window.ScrollsModule = M;
+
+        await buildRoster();
+        renderFilterRow();
+        renderGrid();
+        document.getElementById('selected-count').textContent = '0 / 3 selected';
+        document.getElementById('btn-start').disabled = true;
+
+        document.getElementById('btn-clear').onclick = () => {
+            state.selected = [];
+            document.getElementById('selected-count').textContent = '0 / 3 selected';
+            document.getElementById('btn-start').disabled = true;
+            renderGrid();
+        };
+        document.getElementById('btn-start').onclick = startFight;
+        document.getElementById('btn-end-turn').onclick = endTurn;
+        document.getElementById('btn-restart').onclick = () => {
+            document.getElementById('end-screen').classList.add('hidden');
+            document.getElementById('screen-combat').classList.add('hidden');
+            document.getElementById('screen-select').classList.remove('hidden');
+            state.selected = [];
+            document.getElementById('selected-count').textContent = '0 / 3 selected';
+            document.getElementById('btn-start').disabled = true;
+            renderGrid();
+        };
+    } catch (err) {
+        document.body.innerHTML = '<pre style="color:#f88;padding:2em;">Boot failed: ' + err.message + '</pre>';
+        console.error(err);
+    }
+})();
+</script>
+
+</body>
+</html>
