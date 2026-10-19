@@ -26,6 +26,7 @@
                 <option value="10">10 — Master</option>
             </select>
         </div>
+        <button id="btn-patch-notes">Patch Notes</button>
         <button id="btn-clear">Clear</button>
         <button id="btn-start" class="primary" disabled>Start Fight</button>
     </div>
@@ -59,7 +60,6 @@
 
 <script src="build/scrolls.js"></script>
 <script>
-const FILLER_IDS = new Set([11, 12]);
 const ROLE_NAMES = ['Burst', 'Sustain', 'Control', 'Tank', 'Support', 'Flex'];
 const ENERGY_NAMES = ['VIT', 'STR', 'INT', 'WIS', 'ESS'];
 
@@ -95,7 +95,8 @@ async function buildRoster() {
     const M = state.module;
     const size = M.ccall('sw_roster_size', 'number', [], []);
     for (let i = 0; i < size; i++) {
-        if (FILLER_IDS.has(i)) continue;
+        const isFiller = M.ccall('sw_roster_is_filler', 'number', ['number'], [i]);
+        if (isFiller) continue;
         const name = M.ccall('sw_roster_name', 'string', ['number'], [i]);
         const hp = M.ccall('sw_roster_hp', 'number', ['number'], [i]);
         const role = M.ccall('sw_roster_role', 'number', ['number'], [i]);
@@ -178,7 +179,8 @@ function startFight() {
     const [p1a, p1b, p1c] = state.selected;
     const pool = [];
     for (let i = 0; i < M.ccall('sw_roster_size', 'number', [], []); i++) {
-        if (!FILLER_IDS.has(i) && !state.selected.includes(i)) pool.push(i);
+        const isFiller = M.ccall('sw_roster_is_filler', 'number', ['number'], [i]);
+        if (!isFiller && !state.selected.includes(i)) pool.push(i);
     }
     for (let i = pool.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -462,6 +464,12 @@ function endTurn() {
         };
         document.getElementById('btn-start').onclick = startFight;
         document.getElementById('btn-end-turn').onclick = endTurn;
+        document.getElementById('btn-patch-notes').onclick = () => {
+            document.getElementById('patch-modal').classList.remove('hidden');
+        };
+        document.getElementById('btn-close-modal').onclick = () => {
+            document.getElementById('patch-modal').classList.add('hidden');
+        };
         document.getElementById('btn-restart').onclick = () => {
             document.getElementById('end-screen').classList.add('hidden');
             document.getElementById('screen-combat').classList.add('hidden');
@@ -477,6 +485,19 @@ function endTurn() {
     }
 })();
 </script>
+
+<div id="patch-modal" class="modal hidden">
+    <div class="modal-content">
+        <h2>Alpha v0.22 Patch Notes</h2>
+        <ul>
+            <li><strong>New Characters:</strong> Novice (Support/Triage) and Sentinel (Tank/Last Stand).</li>
+            <li><strong>Wolf:</strong> Alpha Strike now heals Wolf if the target is marked.</li>
+            <li><strong>Essence:</strong> Fixed a bug where Essence couldn't be used to pay for generic costs.</li>
+            <li><strong>UI:</strong> Added status badges for buffs/debuffs, ability tooltips, and passive inspections.</li>
+        </ul>
+        <button id="btn-close-modal" class="primary" style="margin-top:1em;">Close</button>
+    </div>
+</div>
 
 </body>
 </html>

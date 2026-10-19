@@ -163,3 +163,27 @@ h2 { font-size: 1.1em; margin: 1em 0 0.5em 0; color: #a8a8c0; }
 .badge-mark { background: #f44; color: white; } /* Mark */
 .badge-trap { background: #444; color: white; border: 1px solid #f44; } /* Trap */
 .badge-stance { background: #66a; color: white; } /* Stance */
+
+/* --- PATCH NOTES MODAL --- */
+.modal {
+    position: absolute;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 200;
+}
+.modal-content {
+    background: #16162a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 2em;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+.modal-content h2 { color: #6aa8ff; margin-top: 0; }
+.modal-content ul { padding-left: 1.5em; line-height: 1.6; }
+.modal-content button { background: #4a6aa8; border: 1px solid #6aa8ff; color: #eaeaea; border-radius: 4px; padding: 0.5em 1.2em; cursor: pointer; font-size: 0.9em; margin-top: 1em; }
+.modal-content button:hover { background: #5a7ab8; }
