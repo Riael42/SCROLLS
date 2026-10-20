@@ -121,6 +121,17 @@ h2 { font-size: 1.1em; margin: 1em 0 0.5em 0; color: #a8a8c0; }
 .combat-controls button.primary { background: #4a6aa8; border-color: #6aa8ff; }
 .combat-controls button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Combat log slide-out panel */
+.log-btn { position: absolute; right: 10px; top: 10px; z-index: 60; }
+.log-panel {
+    position: absolute; right: 0; top: 50px; bottom: 100px; width: 300px;
+    background: rgba(22, 22, 42, 0.95); border-left: 1px solid #444;
+    padding: 1em; overflow-y: auto; font-size: 0.85em; font-family: monospace;
+    transition: transform 0.3s; transform: translateX(100%); z-index: 50;
+}
+.log-panel.open { transform: translateX(0); }
+.log-entry { margin-bottom: 0.5em; color: #ccc; border-bottom: 1px solid #222; padding-bottom: 0.2em; }
+
 /* End Screen Overlay */
 #end-screen {
     position: absolute;
@@ -219,3 +230,46 @@ h2 { font-size: 1.1em; margin: 1em 0 0.5em 0; color: #a8a8c0; }
 .modal-content ul { padding-left: 1.5em; line-height: 1.6; }
 .modal-content button { background: #4a6aa8; border: 1px solid #6aa8ff; color: #eaeaea; border-radius: 4px; padding: 0.5em 1.2em; cursor: pointer; font-size: 0.9em; margin-top: 1em; }
 .modal-content button:hover { background: #5a7ab8; }
+
+/* Energy payment modal — TCG prompt style */
+.energy-modal-content {
+    max-width: 420px;
+    border: 2px solid #6aa8ff;
+    box-shadow: 0 0 12px rgba(106, 168, 255, 0.3);
+}
+.energy-modal-content h2 {
+    color: #6aa8ff;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    border-bottom: 2px solid #6aa8ff;
+    padding-bottom: 0.5em;
+}
+.energy-btn {
+    background: #1a1a2e;
+    border: 2px solid #444;
+    color: #eaeaea;
+    border-radius: 6px;
+    padding: 0.75em 1em;
+    min-width: 90px;
+    font-family: monospace;
+    font-weight: bold;
+    font-size: 0.9em;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.energy-btn:hover {
+    border-color: #6aa8ff;
+    background: #1a2040;
+    box-shadow: 0 0 8px rgba(106, 168, 255, 0.3);
+}
+.energy-btn.selected {
+    border-color: #ffd700;
+    background: #2a2040;
+    color: #ffd700;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
+}
+
+/* Hub screen */
+.hub-stats { display: flex; gap: 2em; margin: 2em 0; font-family: monospace; font-size: 1.1em; }
+.hub-stats div { color: #a8a8c0; }
+.hub-stats span { color: #6aa8ff; font-weight: bold; }

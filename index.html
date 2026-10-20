@@ -7,7 +7,16 @@
 </head>
 <body>
 
-<div id="screen-select" class="screen">
+<div id="screen-hub" class="screen">
+    <h1>Scrolls — Alpha Hub</h1>
+    <div class="hub-stats">
+        <div>Scrolls: <span id="hub-scrolls"></span></div>
+        <div>Source: <span id="hub-source"></span></div>
+    </div>
+    <button id="btn-enter-arena" class="primary" style="font-size:1.5em; padding:1em 2em; margin-top:2em;">Enter the Arena</button>
+</div>
+
+<div id="screen-select" class="screen hidden">
     <h1>Scrolls — Alpha</h1>
     <h2>Pick 3 characters</h2>
 
@@ -51,7 +60,10 @@
         <div id="combat-turn">Turn 1</div>
         <div class="energy-pool" id="energy-player">YOU: -</div>
         <div class="energy-pool" id="energy-enemy">ENEMY: -</div>
+        <button id="btn-toggle-log" class="log-btn">Show Log</button>
     </div>
+    
+    <div id="log-panel" class="log-panel"></div>
     
     <div class="combat-main">
         <div class="team-column player" id="team-player"></div>
@@ -74,8 +86,33 @@
 
 <script src="build/scrolls.js"></script>
 <script>
+const SAVE_KEY = 'scrolls_alpha_save_v1';
+let saveData = {
+    scrolls: { day: 0, night: 0, dawn: 0, dusk: 0 },
+    source: 0,
+    roster: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+    tickets: []
+};
+
+function loadSave() {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw) {
+        try { saveData = JSON.parse(raw); } catch(e) {}
+    }
+}
+function writeSave() {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+}
+loadSave();
+
+function updateHubUI() {
+    const s = saveData.scrolls;
+    document.getElementById('hub-scrolls').textContent = `Day: ${s.day} | Night: ${s.night} | Dawn: ${s.dawn} | Dusk: ${s.dusk}`;
+    document.getElementById('hub-source').textContent = saveData.source;
+}
+
 const ROLE_NAMES = ['Burst', 'Sustain', 'Control', 'Tank', 'Support', 'Flex'];
-const ENERGY_NAMES = ['VIT', 'STR', 'INT', 'WIS', 'ESS'];
+const ENERGY_NAMES = ['VIT', 'STR', 'INT', 'WIS'];
 
 const state = {
     module: null,
@@ -84,6 +121,7 @@ const state = {
     roleFilter: -1,
     matchActive: false,
     selectedAbility: null,
+    pendingCast: null,
 };
 
 window.showInfo = (msg) => {
@@ -91,8 +129,11 @@ window.showInfo = (msg) => {
 };
 
 function fmtCost(costArray) {
+    const labels = ['VIT', 'STR', 'INT', 'WIS', 'ESS'];
     const parts = [];
-    for (let i = 0; i < 5; i++) if (costArray[i] > 0) parts.push(`${ENERGY_NAMES[i]}:${costArray[i]}`);
+    for (let i = 0; i < 5; i++) {
+        if (costArray[i] > 0) parts.push(`${labels[i]}:${costArray[i]}`);
+    }
     return parts.join(' ') || 'free';
 }
 
@@ -285,6 +326,15 @@ function renderTeam(side, containerId, isPlayer) {
                     [ab.side, ab.charIdx, ab.slotIdx, side, i]);
                     
                 if (isValid) {
+                    const caster = s.teams[ab.side].chars[ab.charIdx];
+                    const payment = calculateEnergyPayment(ab.abilityObj, caster, s.teams[ab.side].energy);
+
+                    if (payment.needsChoice) {
+                        state.pendingCast = { ab, targetSide: side, targetIdx: i, payment };
+                        showEnergyModal(payment);
+                        return;
+                    }
+
                     const ok = state.module.ccall('sw_cast', 'number', 
                         ['number','number','number','number','number'], 
                         [ab.side, ab.charIdx, ab.slotIdx, side, i]);
@@ -515,10 +565,16 @@ function updateCombatUI() {
 
     document.getElementById('combat-turn').textContent = `Turn ${s.turn} - ${s.active === 0 ? 'Your Turn' : 'Enemy Turn'}`;
     
-    const eP = s.teams[0].energy;
-    const eE = s.teams[1].energy;
-    document.getElementById('energy-player').innerHTML = `<span>YOU:</span> ${ENERGY_NAMES.map((n, i) => `${n}:${eP[i]}`).join(' ')}`;
-    document.getElementById('energy-enemy').innerHTML = `<span>ENEMY:</span> ${ENERGY_NAMES.map((n, i) => `${n}:${eE[i]}`).join(' ')}`;
+    document.getElementById('energy-player').innerHTML = `<span>YOU:</span> ${ENERGY_NAMES.map((n, i) => `${n}:${s.teams[0].energy[i]}`).join(' ')}`;
+    document.getElementById('energy-enemy').innerHTML = `<span>ENEMY:</span> ${ENERGY_NAMES.map((n, i) => `${n}:${s.teams[1].energy[i]}`).join(' ')}`;
+
+    const logPanel = document.getElementById('log-panel');
+    const entries = s.log || [];
+    let html = '';
+    for (let i = entries.length - 1; i >= 0; i--) {
+        html += `<div class="log-entry">${entries[i]}</div>`;
+    }
+    logPanel.innerHTML = html;
 
     renderTeam(0, 'team-player', true);
     renderTeam(1, 'team-enemy', false);
@@ -530,6 +586,33 @@ function updateCombatUI() {
         endTitle.textContent = s.winner === 0 ? 'VICTORY!' : 'DEFEAT...';
         endTitle.className = 'end-title ' + (s.winner === 0 ? 'victory' : 'defeat');
         document.getElementById('btn-end-turn').disabled = true;
+
+        const restartBtn = document.getElementById('btn-restart');
+        if (s.winner === 0) {
+            restartBtn.textContent = 'Claim Reward & Return to Hub';
+            restartBtn.onclick = () => {
+                const types = ['day', 'night', 'dawn', 'dusk'];
+                const roll = types[Math.floor(Math.random() * types.length)];
+                saveData.scrolls[roll] += 1;
+                saveData.source += 50;
+                writeSave();
+                updateHubUI();
+                document.getElementById('end-screen').classList.add('hidden');
+                document.getElementById('screen-combat').classList.add('hidden');
+                document.getElementById('screen-hub').classList.remove('hidden');
+            };
+        } else {
+            restartBtn.textContent = 'Return to Select';
+            restartBtn.onclick = () => {
+                document.getElementById('end-screen').classList.add('hidden');
+                document.getElementById('screen-combat').classList.add('hidden');
+                document.getElementById('screen-select').classList.remove('hidden');
+                state.selected = [];
+                document.getElementById('selected-count').textContent = '0 / 3 selected';
+                document.getElementById('btn-start').disabled = true;
+                renderGrid();
+            };
+        }
         return;
     }
 
@@ -554,12 +637,130 @@ function endTurn() {
     updateCombatUI();
 }
 
+/* --- Manual energy payment --- */
+
+function calculateEnergyPayment(abilityObj, caster, teamEnergy) {
+    const specificCost = abilityObj.cost.slice(0, 4);
+    const genericCost = abilityObj.cost[4] + (caster.cost_tax || 0);
+
+    // Base pay: specific colors are mandatory
+    const pay = [...specificCost];
+
+    // If no generic cost, no modal needed
+    if (genericCost === 0) {
+        return { needsChoice: false, pay };
+    }
+
+    // Calculate remaining energy after paying specific costs
+    const remaining = [];
+    for (let c = 0; c < 4; c++) {
+        const rem = teamEnergy[c] - specificCost[c];
+        if (rem > 0) remaining.push({ color: c, available: rem, name: ENERGY_NAMES[c] });
+    }
+
+    if (remaining.length === 0) {
+        return { needsChoice: false, pay };
+    }
+
+    if (remaining.length === 1) {
+        const c = remaining[0].color;
+        pay[c] += genericCost;
+        return { needsChoice: false, pay };
+    }
+
+    return { needsChoice: true, totalNeeded: genericCost, remaining, pay };
+}
+
+function showEnergyModal(payment) {
+    const modal = document.getElementById('energy-modal');
+    const title = document.getElementById('energy-modal-title');
+    const message = document.getElementById('energy-modal-message');
+    const buttons = document.getElementById('energy-modal-buttons');
+    const selectedDisplay = document.getElementById('energy-modal-selected');
+    const confirmBtn = document.getElementById('energy-modal-confirm');
+
+    title.textContent = 'Pay Energy';
+    message.textContent = `Pay ${payment.totalNeeded} Energy for ${state.pendingCast.ab.abilityObj.name}`;
+    buttons.innerHTML = '';
+    selectedDisplay.textContent = '';
+
+    const chosen = {};
+
+    payment.remaining.forEach(r => {
+        const btn = document.createElement('button');
+        btn.className = 'energy-btn';
+        btn.textContent = `${r.name} (${r.available})`;
+        btn.onclick = () => {
+            chosen[r.color] = (chosen[r.color] || 0) + 1;
+            if (chosen[r.color] > r.available) chosen[r.color] = r.available;
+            updateModalDisplay();
+        };
+        buttons.appendChild(btn);
+    });
+
+    function updateModalDisplay() {
+        let total = 0;
+        const parts = [];
+        for (let c = 0; c < 4; c++) {
+            if (chosen[c]) {
+                total += chosen[c];
+                parts.push(`${ENERGY_NAMES[c]}:${chosen[c]}`);
+            }
+        }
+        selectedDisplay.textContent = 'Selected: ' + parts.join(' ') + ` (${total}/${payment.totalNeeded})`;
+        confirmBtn.disabled = total < payment.totalNeeded;
+    }
+
+    confirmBtn.onclick = () => {
+        const basePay = [...state.pendingCast.payment.pay];
+        const pay = [0, 0, 0, 0];
+        for (let c = 0; c < 4; c++) {
+            pay[c] = basePay[c] + (chosen[c] || 0);
+        }
+        const { ab, targetSide, targetIdx } = state.pendingCast;
+        state.pendingCast = null;
+        state.selectedAbility = null;
+        modal.classList.add('hidden');
+
+        const ok = state.module.ccall('sw_cast_with_payment', 'number',
+            ['number','number','number','number','number','number','number','number','number'],
+            [ab.side, ab.charIdx, ab.slotIdx, targetSide, targetIdx,
+             pay[0], pay[1], pay[2], pay[3]]);
+        if (ok) {
+            document.getElementById('combat-info').innerHTML = `
+                <div class="content">
+                    <strong style="color:#6aa8ff">${ab.abilityObj.name} cast!</strong>
+                </div>
+            `;
+            updateCombatUI();
+        }
+    };
+
+    document.getElementById('energy-modal-cancel').onclick = () => {
+        state.pendingCast = null;
+        modal.classList.add('hidden');
+    };
+
+    modal.classList.remove('hidden');
+}
+
 (async () => {
     try {
         const M = await createScrollsModule();
         M.ccall('sw_init', null, [], []);
         state.module = M;
         window.ScrollsModule = M;
+
+        document.getElementById('screen-combat').classList.add('hidden');
+        document.getElementById('screen-select').classList.add('hidden');
+        document.getElementById('screen-hub').classList.remove('hidden');
+        document.getElementById('end-screen').classList.add('hidden');
+        updateHubUI();
+
+        document.getElementById('btn-enter-arena').onclick = () => {
+            document.getElementById('screen-hub').classList.add('hidden');
+            document.getElementById('screen-select').classList.remove('hidden');
+        };
 
         await buildRoster();
         renderFilterRow();
@@ -590,6 +791,9 @@ function endTurn() {
             document.getElementById('btn-start').disabled = true;
             renderGrid();
         };
+        document.getElementById('btn-toggle-log').onclick = () => {
+            document.getElementById('log-panel').classList.toggle('open');
+        };
     } catch (err) {
         document.body.innerHTML = '<pre style="color:#f88;padding:2em;">Boot failed: ' + err.message + '</pre>';
         console.error(err);
@@ -607,6 +811,17 @@ function endTurn() {
             <li><strong>UI:</strong> Added status badges for buffs/debuffs, ability tooltips, and passive inspections.</li>
         </ul>
         <button id="btn-close-modal" class="primary" style="margin-top:1em;">Close</button>
+    </div>
+</div>
+
+<div id="energy-modal" class="modal hidden">
+    <div class="modal-content energy-modal-content">
+        <h2 id="energy-modal-title">Pay Energy</h2>
+        <div id="energy-modal-message" style="margin-bottom: 1em;"></div>
+        <div id="energy-modal-buttons" style="display: flex; flex-wrap: wrap; gap: 0.5em; margin-bottom: 1em;"></div>
+        <div id="energy-modal-selected" style="margin-bottom: 1em; font-family: monospace; font-size: 0.9em; color: #a8a8c0;"></div>
+        <button id="energy-modal-confirm" class="primary" disabled>Confirm Cast</button>
+        <button id="energy-modal-cancel">Cancel</button>
     </div>
 </div>
 
