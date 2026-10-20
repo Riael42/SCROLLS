@@ -13,7 +13,52 @@
         <div>Scrolls: <span id="hub-scrolls"></span></div>
         <div>Source: <span id="hub-source"></span></div>
     </div>
-    <button id="btn-enter-arena" class="primary" style="font-size:1.5em; padding:1em 2em; margin-top:2em;">Enter the Arena</button>
+    <button id="btn-enter-arena" class="primary" style="font-size:1.5em; padding:1em 2em; margin-top:2em;">Sparring Match</button>
+    <button id="btn-enter-pg" class="primary" style="font-size:1.2em; padding:0.8em 1.5em; margin-top:1em;">Proving Grounds Map</button>
+    <button id="btn-enter-tourney" class="primary" style="font-size:1.2em; padding:0.8em 1.5em; margin-top:1em;">Tournament</button>
+</div>
+
+<div id="screen-tourney" class="screen hidden">
+    <h1>Tournament Bracket</h1>
+    <div id="tourney-info" style="margin-bottom:1em; font-family: monospace;"></div>
+    <div id="tourney-bracket" style="display:flex; flex-direction:column; gap:1em;"></div>
+    <button id="btn-tourney-back" style="font-size:1em; padding:0.6em 1.2em; margin-top:1.5em;">Return to Hub</button>
+</div>
+
+<div id="screen-pg-draft" class="screen hidden">
+    <h1>Proving Grounds — 5-Man Draft</h1>
+    <div id="pg-draft-info" style="margin-bottom:1em; font-family: monospace;"></div>
+    <div id="pg-draft-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75em; margin-bottom: 1em;"></div>
+    <div id="pg-draft-selected" style="margin-bottom:1em; font-family: monospace;"></div>
+    <button id="btn-pg-draft-start" class="primary" style="font-size:1.1em; padding:0.8em 1.5em; margin-top:1em;" disabled>Start Proving Grounds</button>
+    <button id="btn-pg-draft-back" style="font-size:1em; padding:0.6em 1.2em; margin-top:1em;">Return to Hub</button>
+</div>
+
+<div id="screen-spectate" class="screen hidden">
+    <h1>Spectate — Replay</h1>
+    <div id="spectate-info" style="margin-bottom:0.5em; font-family: monospace;"></div>
+    <div id="spectate-combat" style="flex:1; display:flex; flex-direction:column;"></div>
+    <button id="btn-spectate-back" style="font-size:1em; padding:0.6em 1.2em; margin-top:1em;">Return to Bracket</button>
+</div>
+
+<div id="screen-pg-map" class="screen hidden">
+    <h1>Scrolls — Proving Grounds</h1>
+    <div class="pg-stats">
+        <div>Circle: <span id="pg-circle"></span></div>
+        <div>Actions Left: <span id="pg-actions"></span></div>
+        <div>Scrolls: <span id="pg-scrolls"></span></div>
+    </div>
+    <div id="pg-btn-container"></div>
+    <button id="btn-pg-back" style="font-size:1em; padding:0.6em 1.2em; margin-top:1.5em;">Return to Hub</button>
+</div>
+
+<div id="screen-pg-fight-select" class="screen hidden">
+    <h1>Proving Grounds — Choose 3 Fighters</h1>
+    <div id="pg-fight-info" style="margin-bottom:1em; font-family: monospace;"></div>
+    <div id="pg-fight-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75em; margin-bottom: 1em;"></div>
+    <div id="pg-fight-selected" style="margin-bottom:1em; font-family: monospace;"></div>
+    <button id="btn-pg-fight-start" class="primary" style="font-size:1.1em; padding:0.8em 1.5em; margin-top:1em;" disabled>Start Fight</button>
+    <button id="btn-pg-fight-back" style="font-size:1em; padding:0.6em 1.2em; margin-top:1em;">Back to Map</button>
 </div>
 
 <div id="screen-select" class="screen hidden">
@@ -57,10 +102,12 @@
 
 <div id="screen-combat" class="screen hidden">
     <div class="top-bar">
-        <div id="combat-turn">Turn 1</div>
-        <div class="energy-pool" id="energy-player">YOU: -</div>
-        <div class="energy-pool" id="energy-enemy">ENEMY: -</div>
-        <button id="btn-toggle-log" class="log-btn">Show Log</button>
+        <div class="energy-pool" id="energy-player" style="flex: 1; text-align: left;"></div>
+        <div id="combat-turn" style="flex: 0 0 200px; text-align: center; font-weight: bold;"></div>
+        <div class="top-right" style="flex: 1; display: flex; justify-content: flex-end; align-items: center; gap: 1em;">
+            <div class="energy-pool" id="energy-enemy"></div>
+            <button id="btn-show-log" style="padding: 0.2em 0.5em; font-size: 0.9em;">Show Log</button>
+        </div>
     </div>
     
     <div id="log-panel" class="log-panel"></div>
@@ -120,6 +167,9 @@ const state = {
     selected: [],
     roleFilter: -1,
     matchActive: false,
+    pgMode: false,
+    tourneyMode: false,
+    pgDraft: [],
     selectedAbility: null,
     pendingCast: null,
 };
@@ -229,7 +279,468 @@ function toggleSelect(id) {
     renderGrid();
 }
 
+function togglePGSelect(id) {
+    const idx = state.pgDraft.indexOf(id);
+    if (idx >= 0) state.pgDraft.splice(idx, 1);
+    else if (state.pgDraft.length < 5) state.pgDraft.push(id);
+    updatePGDraftUI();
+}
+
+function updatePGDraftUI() {
+    const M = state.module;
+    const json = M.ccall('sw_meta_get_state', 'string', [], []);
+    const s = JSON.parse(json);
+    const debugMode = s.debug_mode === 1;
+
+    const grid = document.getElementById('pg-draft-grid');
+    grid.innerHTML = '';
+    for (const ch of state.roster) {
+        if (!debugMode && (!s.unlocked || s.unlocked[ch.id] === 0)) continue;
+        const card = document.createElement('div');
+        card.className = 'char-card';
+        if (state.pgDraft.includes(ch.id)) card.classList.add('selected');
+        card.onclick = () => togglePGSelect(ch.id);
+
+        const abilitiesHtml = ch.abilities.map(a =>
+            `<div class="ability"><span>${a.name}</span><span class="cost">${fmtCost(a.cost)}</span></div>`
+        ).join('');
+
+        card.innerHTML = `
+            <div class="char-name">${ch.name}</div>
+            <div class="char-badges">${ROLE_NAMES[ch.role]} · ${ch.flavorName}</div>
+            <div class="char-hp">${ch.hp} HP</div>
+            <div class="char-abilities">${abilitiesHtml}</div>
+        `;
+        grid.appendChild(card);
+    }
+
+    const info = document.getElementById('pg-draft-info');
+    info.textContent = `Select 5 characters for your Proving Grounds team.`;
+
+    const sel = document.getElementById('pg-draft-selected');
+    sel.textContent = `Selected: ${state.pgDraft.length} / 5`;
+
+    const btn = document.getElementById('btn-pg-draft-start');
+    btn.disabled = state.pgDraft.length !== 5;
+}
+
+function startPGFromDraft() {
+    const M = state.module;
+    const ids = state.pgDraft;
+    M.ccall('sw_meta_action', 'number',
+        ['number','number','number','number','number','number','number'],
+        [100, ids[0], ids[1], ids[2], ids[3], ids[4], 0]);
+    document.getElementById('screen-pg-draft').classList.add('hidden');
+    document.getElementById('screen-pg-map').classList.remove('hidden');
+    state.pgMode = true;
+    updatePGMapUI();
+}
+
+function updatePGMapUI() {
+    const M = state.module;
+    const json = M.ccall('sw_meta_get_state', 'string', [], []);
+    const s = JSON.parse(json);
+
+    document.getElementById('pg-circle').textContent = s.pg_current_circle;
+    document.getElementById('pg-actions').textContent = s.pg_actions_left;
+    const sc = s.scrolls;
+    document.getElementById('pg-scrolls').textContent = `Day:${sc[0]} Night:${sc[1]} Dawn:${sc[2]} Dusk:${sc[3]}`;
+
+    const container = document.getElementById('pg-btn-container');
+    container.innerHTML = '';
+
+    const PLAN_NAMES = ['Balanced', 'Headhunter', 'Bully', 'Staller', 'Coward'];
+
+    const trainerData = [
+        { name: 'The Tactician', title: 'The Wall', plan: 'Coward', greed: 50, bloodlust: 10, pride: 20, team: ['Golemancer', 'Survivalist', 'Archer'], circle: 1 },
+        { name: 'The Bloodhound', title: 'The Butcher', plan: 'Bully', greed: 20, bloodlust: 95, pride: 10, team: ['Wolf', 'Soul Collector', 'Cub'], circle: 1 },
+        { name: 'The Gambler', title: 'The All-In', plan: 'Balanced', greed: 90, bloodlust: 70, pride: 80, team: ['Soul Collector', 'Corporal', 'Charmist'], circle: 2 },
+        { name: 'The Viper', title: 'The Assassin', plan: 'Headhunter', greed: 30, bloodlust: 60, pride: 50, team: ['Lockaff', 'Archer', 'Hierophant'], circle: 2 },
+        { name: 'The Ironclad', title: 'The Turtle', plan: 'Coward', greed: 50, bloodlust: 10, pride: 20, team: ['MrManaGuardian', 'Golemancer', 'Charmist'], circle: 3 },
+        { name: 'The Mirage', title: 'The Illusionist', plan: 'Balanced', greed: 50, bloodlust: 50, pride: 50, team: ['Wolf', 'Lockaff', 'Novice'], circle: 3 },
+        { name: 'The Rook', title: 'The Fortress', plan: 'Coward', greed: 40, bloodlust: 20, pride: 10, team: ['Sentinel', 'Archer', 'Novice'], circle: 3 }
+    ];
+
+    const available = s.trainers || [];
+
+    /* Fight buttons — one per available trainer. */
+    for (let ti = 0; ti < available.length; ti++) {
+        const tname = available[ti];
+        const tdata = trainerData.find(t => t.name === tname);
+        if (!tdata) continue;
+
+        const btn = document.createElement('button');
+        btn.textContent = 'Fight ' + tname;
+        btn.className = 'primary';
+        btn.style.padding = '0.5em 1em';
+        btn.style.margin = '0.25em';
+        btn.onclick = () => {
+            const trainerIdx = trainerData.findIndex(t => t.name === tname);
+            const ok = M.ccall('sw_meta_action', 'number', ['number','number','number','number','number','number'], [0, trainerIdx, 0, 0, 0, 0]);
+            if (!ok) {
+                document.getElementById('combat-info').innerHTML = `<div class="content">No actions left.</div>`;
+                return;
+            }
+            const freshJson = M.ccall('sw_meta_get_state', 'string', [], []);
+            const freshState = JSON.parse(freshJson);
+            showPGFightSelect(M, freshState);
+        };
+        container.appendChild(btn);
+    }
+
+    // TODO: Re-enable scouting in the 2DRPG integration.
+
+    const restBtn = document.createElement('button');
+    restBtn.textContent = 'Rest';
+    restBtn.className = 'primary';
+    restBtn.style.padding = '0.5em 1em';
+    restBtn.style.margin = '0.25em';
+    restBtn.onclick = () => {
+        const ok = M.ccall('sw_meta_action', 'number', ['number','number','number','number','number','number'], [2, 0, 0, 0, 0, 0]);
+        if (!ok) {
+            document.getElementById('combat-info').innerHTML = `<div class="content">No actions left.</div>`;
+            return;
+        }
+        updatePGMapUI();
+    };
+    container.appendChild(restBtn);
+
+    const centerBtn = document.createElement('button');
+    centerBtn.textContent = 'Move to Center';
+    centerBtn.className = 'primary';
+    centerBtn.style.padding = '0.5em 1em';
+    centerBtn.style.margin = '0.25em';
+    centerBtn.onclick = () => {
+        const ok = M.ccall('sw_meta_action', 'number', ['number','number','number','number','number','number'], [3, 0, 0, 0, 0, 0]);
+        if (!ok) {
+            document.getElementById('combat-info').innerHTML = `<div class="content">No actions left.</div>`;
+            return;
+        }
+        updatePGMapUI();
+    };
+    container.appendChild(centerBtn);
+
+    const abortBtn = document.createElement('button');
+    abortBtn.textContent = 'Abort Run';
+    abortBtn.className = 'primary';
+    abortBtn.style.padding = '0.5em 1em';
+    abortBtn.style.margin = '0.25em';
+    abortBtn.onclick = () => {
+        const ok = M.ccall('sw_meta_action', 'number', ['number','number','number','number','number','number'], [4, 0, 0, 0, 0, 0]);
+        if (!ok) {
+            document.getElementById('combat-info').innerHTML = `<div class="content">No actions left.</div>`;
+            return;
+        }
+        updatePGMapUI();
+    };
+    container.appendChild(abortBtn);
+}
+
+function startPGFight(M, s) {
+    // Pick first 3 alive members of the player's 5-man team
+    const team = [];
+    for (let i = 0; i < 5; i++) {
+        if (s.pg_hp[i] > 0 && team.length < 3) team.push(s.pg_team[i]);
+    }
+    while (team.length < 3) team.push(0);
+
+    const [e0, e1, e2] = [s.pg_enemies[0], s.pg_enemies[1], s.pg_enemies[2]];
+
+    M.ccall('sw_new_match', 'number', ['number','number','number','number','number','number','number'],
+        [team[0], team[1], team[2], e0, e1, e2, 5]);
+
+    state.pgMode = true;
+    state.matchActive = true;
+    document.getElementById('screen-pg-map').classList.add('hidden');
+    document.getElementById('screen-combat').classList.remove('hidden');
+    document.getElementById('end-screen').classList.add('hidden');
+    document.getElementById('combat-info').innerHTML = `<div class="content">Select an ability to see details.</div>`;
+    updateCombatUI();
+}
+
+let pgFightSelected = [];
+
+function showPGFightSelect(M, s) {
+    pgFightSelected = [];
+
+    document.getElementById('screen-pg-map').classList.add('hidden');
+    document.getElementById('screen-pg-fight-select').classList.remove('hidden');
+
+    const info = document.getElementById('pg-fight-info');
+    info.textContent = `Choose 3 of your 5 drafted characters for the fight.`;
+
+    const grid = document.getElementById('pg-fight-grid');
+    grid.innerHTML = '';
+
+    // Roster name lookup for display
+    const rosterNames = {
+        0: 'MrManaGuardian', 1: 'Brute', 2: 'Wolf', 3: 'Lockaff', 4: 'SoulCollector',
+        5: 'Golemancer', 6: 'Charmist', 7: 'Corporal', 8: 'Survivalist', 9: 'Archer',
+        10: 'Hierophant', 11: 'Cub', 12: 'Novice', 13: 'Sentinel', 14: 'Striker',
+        15: 'Medic', 16: 'Master Wolf', 17: 'Young Pup', 18: 'The Prophet', 19: 'Joker'
+    };
+
+    for (let i = 0; i < 5; i++) {
+        const charId = s.pg_team[i];
+        const hp = s.pg_hp[i];
+        const isDead = hp <= 0;
+        const isSelected = pgFightSelected.includes(charId);
+        const name = rosterNames[charId] ?? `Char ${charId}`;
+
+        const card = document.createElement('div');
+        card.className = 'char-card';
+        if (isDead) card.classList.add('dead');
+        if (isSelected) card.classList.add('selected');
+        card.onclick = () => {
+            if (isDead) return;
+            if (isSelected) {
+                pgFightSelected = pgFightSelected.filter(id => id !== charId);
+            } else if (pgFightSelected.length < 3) {
+                pgFightSelected.push(charId);
+            }
+            renderPGFightSelect(M, s);
+        };
+
+        card.innerHTML = `
+            <div class="char-name">${name}</div>
+            <div class="char-hp">HP: ${hp}</div>
+            <div class="char-slot">Slot ${i + 1}</div>
+        `;
+        grid.appendChild(card);
+    }
+
+    const sel = document.getElementById('pg-fight-selected');
+    sel.textContent = `Selected: ${pgFightSelected.length} / 3`;
+
+    const startBtn = document.getElementById('btn-pg-fight-start');
+    startBtn.disabled = pgFightSelected.length !== 3;
+    startBtn.onclick = () => {
+        const [e0, e1, e2] = [s.pg_enemies[0], s.pg_enemies[1], s.pg_enemies[2]];
+        M.ccall('sw_new_match', 'number', ['number','number','number','number','number','number','number'],
+            [pgFightSelected[0], pgFightSelected[1], pgFightSelected[2], e0, e1, e2, 5]);
+
+        state.pgMode = true;
+        state.matchActive = true;
+        document.getElementById('screen-pg-fight-select').classList.add('hidden');
+        document.getElementById('screen-combat').classList.remove('hidden');
+        document.getElementById('end-screen').classList.add('hidden');
+        document.getElementById('combat-info').innerHTML = `<div class="content">Select an ability to see details.</div>`;
+        updateCombatUI();
+    };
+
+    document.getElementById('btn-pg-fight-back').onclick = () => {
+        document.getElementById('screen-pg-fight-select').classList.add('hidden');
+        document.getElementById('screen-pg-map').classList.remove('hidden');
+    };
+}
+
+function renderPGFightSelect(M, s) {
+    const grid = document.getElementById('pg-fight-grid');
+    const children = Array.from(grid.children);
+    const rosterNames = {
+        0: 'MrManaGuardian', 1: 'Brute', 2: 'Wolf', 3: 'Lockaff', 4: 'SoulCollector',
+        5: 'Golemancer', 6: 'Charmist', 7: 'Corporal', 8: 'Survivalist', 9: 'Archer',
+        10: 'Hierophant', 11: 'Cub', 12: 'Novice', 13: 'Sentinel', 14: 'Striker',
+        15: 'Medic', 16: 'Master Wolf', 17: 'Young Pup', 18: 'The Prophet', 19: 'Joker'
+    };
+
+    for (let i = 0; i < 5; i++) {
+        const card = children[i];
+        if (!card) continue;
+        const charId = s.pg_team[i];
+        const isDead = s.pg_hp[i] <= 0;
+        const isSelected = pgFightSelected.includes(charId);
+        card.className = 'char-card';
+        if (isDead) card.classList.add('dead');
+        if (isSelected) card.classList.add('selected');
+    }
+
+    const sel = document.getElementById('pg-fight-selected');
+    sel.textContent = `Selected: ${pgFightSelected.length} / 3`;
+
+    const startBtn = document.getElementById('btn-pg-fight-start');
+    startBtn.disabled = pgFightSelected.length !== 3;
+}
+
+let spectateInterval = null;
+let spectateActions = [];
+let spectateIdx = 0;
+
+function startSpectate(replayJson) {
+    const actions = JSON.parse(replayJson);
+    spectateActions = actions;
+    spectateIdx = 0;
+
+    if (spectateInterval) clearInterval(spectateInterval);
+
+    document.getElementById('screen-combat').classList.add('hidden');
+    document.getElementById('screen-pg-map').classList.add('hidden');
+    document.getElementById('screen-tourney').classList.add('hidden');
+    document.getElementById('screen-select').classList.add('hidden');
+    document.getElementById('end-screen').classList.add('hidden');
+    document.getElementById('screen-spectate').classList.remove('hidden');
+    document.getElementById('spectate-info').textContent = `Replay: ${actions.length} actions`;
+    state.tourneyMode = true;
+
+    // Show first frame
+    updateCombatUI();
+
+    spectateInterval = setInterval(() => {
+        if (spectateIdx >= spectateActions.length) {
+            clearInterval(spectateInterval);
+            spectateInterval = null;
+            document.getElementById('spectate-info').textContent = 'Replay finished.';
+            return;
+        }
+        const act = spectateActions[spectateIdx++];
+        const M = state.module;
+        const ok = M.ccall('sw_cast', 'number',
+            ['number','number','number','number','number'],
+            [act.cs, act.ci, act.si, act.ts, act.ti]);
+        if (!ok) {
+            // Skip actions that can't be cast (e.g. invalid state)
+        }
+        updateCombatUI();
+        document.getElementById('spectate-info').textContent = `Replay: ${spectateIdx}/${spectateActions.length}`;
+    }, 1000);
+}
+
+function stopSpectate() {
+    if (spectateInterval) clearInterval(spectateInterval);
+    spectateInterval = null;
+    spectateActions = [];
+    spectateIdx = 0;
+    state.tourneyMode = false;
+    document.getElementById('screen-spectate').classList.add('hidden');
+    document.getElementById('screen-tourney').classList.remove('hidden');
+    renderTourneyBracket();
+}
+
+function renderTourneyBracket() {
+    const M = state.module;
+    const json = M.ccall('sw_meta_get_tourney_json', 'string', [], []);
+    const t = JSON.parse(json);
+
+    document.getElementById('tourney-info').textContent =
+        `Round ${t.current_round} · Player Slot: ${t.player_slot}`;
+
+    const container = document.getElementById('tourney-bracket');
+    container.innerHTML = '';
+
+    const names = t.trainers || [];
+    const alive = t.alive || [];
+
+    // Round 1: pairs (0,1),(2,3),(4,5),(6,7)
+    const round1Pairs = [[0, 1], [2, 3], [4, 5], [6, 7]];
+    const r1 = document.createElement('div');
+    r1.style.display = 'flex';
+    r1.style.gap = '1em';
+    r1.innerHTML = '<strong>Round 1</strong>';
+    container.appendChild(r1);
+
+    const r1Matches = document.createElement('div');
+    r1Matches.style.display = 'flex';
+    r1Matches.style.gap = '1em';
+    r1Matches.style.marginLeft = '1em';
+    for (const [a, b] of round1Pairs) {
+        const match = document.createElement('div');
+        match.style.border = '1px solid #444';
+        match.style.padding = '0.5em';
+        match.style.borderRadius = '4px';
+        match.style.minWidth = '200px';
+        const aname = names[a]?.name || '?';
+        const bname = names[b]?.name || '?';
+        const aAlive = alive[a] ? '' : ' (DEFEATED)';
+        const bAlive = alive[b] ? '' : ' (DEFEATED)';
+        const isPlayerA = a === t.player_slot;
+        const isPlayerB = b === t.player_slot;
+
+        let btnHtml = '';
+        if (isPlayerA || isPlayerB) {
+            btnHtml = `<button id="tourney-fight-${a}-${b}" class="primary" style="margin-top:0.5em;">Fight</button>`;
+        } else if (alive[a] && alive[b]) {
+            btnHtml = `<button id="tourney-spec-${a}-${b}" class="primary" style="margin-top:0.5em;">Spectate</button>`;
+        }
+
+        match.innerHTML = `
+            <div>${aname}${aAlive}</div>
+            <div>${bname}${bAlive}</div>
+            ${btnHtml}
+        `;
+        r1Matches.appendChild(match);
+    }
+    container.appendChild(r1Matches);
+
+    // Wire up fight buttons for player matches
+    for (const [a, b] of round1Pairs) {
+        const isPlayerA = a === t.player_slot;
+        const isPlayerB = b === t.player_slot;
+        if (isPlayerA || isPlayerB) {
+            const btn = document.getElementById(`tourney-fight-${a}-${b}`);
+            if (btn) {
+                btn.onclick = () => {
+                    // Set player team from profile, start match vs opponent
+                    const opponentIdx = isPlayerA ? b : a;
+                    const opponent = t.trainers[opponentIdx];
+                    const team = t.player_team || [0, 1, 2];
+                    M.ccall('sw_new_match', 'number',
+                        ['number','number','number','number','number','number','number'],
+                        [team[0], team[1], team[2], opponent.team[0], opponent.team[1], opponent.team[2], 5]);
+                    state.tourneyMode = true;
+                    state.matchActive = true;
+                    document.getElementById('screen-tourney').classList.add('hidden');
+                    document.getElementById('screen-combat').classList.remove('hidden');
+                    document.getElementById('end-screen').classList.add('hidden');
+                    document.getElementById('combat-info').innerHTML = `<div class="content">Select an ability to see details.</div>`;
+                    updateCombatUI();
+                };
+            }
+        }
+        if (!isPlayerA && !isPlayerB && alive[a] && alive[b]) {
+            const btn = document.getElementById(`tourney-spec-${a}-${b}`);
+            if (btn) {
+                btn.onclick = () => {
+                    // For AI matches, we don't have a recorded replay yet;
+                    // simulate by running a headless match isn't possible from JS.
+                    // Instead, show a message.
+                    document.getElementById('spectate-info').textContent = 'AI match replay not yet recorded.';
+                    stopSpectate();
+                };
+            }
+        }
+    }
+
+    // Round 2 and Finals placeholders
+    const r2 = document.createElement('div');
+    r2.style.display = 'flex';
+    r2.style.flexDirection = 'column';
+    r2.style.gap = '0.5em';
+    r2.style.marginTop = '1em';
+    r2.innerHTML = '<strong>Round 2 (Semifinals)</strong><div style="color:#888;">Pending Round 1 results</div>';
+    container.appendChild(r2);
+
+    const r3 = document.createElement('div');
+    r3.style.display = 'flex';
+    r3.style.flexDirection = 'column';
+    r3.style.gap = '0.5em';
+    r3.style.marginTop = '1em';
+    r3.innerHTML = '<strong>Finals</strong><div style="color:#888;">Pending Semifinal results</div>';
+    container.appendChild(r3);
+}
+
+function startTourney() {
+    const M = state.module;
+    M.ccall('sw_meta_action', 'number', ['number','number','number','number','number','number'], [101, 0, 0, 0, 0, 0]); // ACTION_START_TOURNAMENT
+    document.getElementById('screen-hub').classList.add('hidden');
+    document.getElementById('screen-tourney').classList.remove('hidden');
+    renderTourneyBracket();
+}
+
 function startFight() {
+    if (state.pgMode) {
+        startPGFight(state.module, JSON.parse(state.module.ccall('sw_meta_get_state', 'string', [], [])));
+        return;
+    }
     const M = state.module;
     const [p1a, p1b, p1c] = state.selected;
     let p2a, p2b, p2c;
@@ -580,6 +1091,10 @@ function updateCombatUI() {
     renderTeam(1, 'team-enemy', false);
 
     if (s.winner >= 0) {
+        const M = state.module;
+        const metaJson = M.ccall('sw_meta_save', 'string', [], []);
+        localStorage.setItem('scrolls_save', metaJson);
+
         const endScreen = document.getElementById('end-screen');
         const endTitle = document.getElementById('end-title');
         endScreen.classList.remove('hidden');
@@ -589,8 +1104,19 @@ function updateCombatUI() {
 
         const restartBtn = document.getElementById('btn-restart');
         if (s.winner === 0) {
-            restartBtn.textContent = 'Claim Reward & Return to Hub';
+            restartBtn.textContent = state.pgMode ? 'Return to Map' : 'Claim Reward & Return to Hub';
             restartBtn.onclick = () => {
+                if (state.pgMode) {
+                    const M = state.module;
+                    M.ccall('sw_meta_action', 'number', ['number','number','number','number','number','number'], [0, 0, 0, 0, 0, 0]); // PG_ACTION_FIGHT, winner=0
+                    document.getElementById('end-screen').classList.add('hidden');
+                    document.getElementById('screen-combat').classList.add('hidden');
+                    document.getElementById('screen-pg-map').classList.remove('hidden');
+                    state.pgMode = false;
+                    state.matchActive = false;
+                    updatePGMapUI();
+                    return;
+                }
                 const types = ['day', 'night', 'dawn', 'dusk'];
                 const roll = types[Math.floor(Math.random() * types.length)];
                 saveData.scrolls[roll] += 1;
@@ -602,8 +1128,17 @@ function updateCombatUI() {
                 document.getElementById('screen-hub').classList.remove('hidden');
             };
         } else {
-            restartBtn.textContent = 'Return to Select';
+            restartBtn.textContent = state.pgMode ? 'Return to Map' : 'Return to Select';
             restartBtn.onclick = () => {
+                if (state.pgMode) {
+                    document.getElementById('end-screen').classList.add('hidden');
+                    document.getElementById('screen-combat').classList.add('hidden');
+                    document.getElementById('screen-pg-map').classList.remove('hidden');
+                    state.pgMode = false;
+                    state.matchActive = false;
+                    updatePGMapUI();
+                    return;
+                }
                 document.getElementById('end-screen').classList.add('hidden');
                 document.getElementById('screen-combat').classList.add('hidden');
                 document.getElementById('screen-select').classList.remove('hidden');
@@ -751,6 +1286,17 @@ function showEnergyModal(payment) {
         state.module = M;
         window.ScrollsModule = M;
 
+        const saved = localStorage.getItem('scrolls_save');
+        if (saved) {
+            M.ccall('sw_meta_load', null, ['string'], [saved]);
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('debug') === 'true') {
+            M.ccall('sw_meta_set_debug', null, ['number'], [1]);
+            console.log("DEBUG MODE ACTIVE: All characters unlocked, infinite Source.");
+        }
+
         document.getElementById('screen-combat').classList.add('hidden');
         document.getElementById('screen-select').classList.add('hidden');
         document.getElementById('screen-hub').classList.remove('hidden');
@@ -760,6 +1306,40 @@ function showEnergyModal(payment) {
         document.getElementById('btn-enter-arena').onclick = () => {
             document.getElementById('screen-hub').classList.add('hidden');
             document.getElementById('screen-select').classList.remove('hidden');
+        };
+
+        document.getElementById('btn-enter-pg').onclick = () => {
+            document.getElementById('screen-hub').classList.add('hidden');
+            document.getElementById('screen-pg-draft').classList.remove('hidden');
+            state.pgDraft = [];
+            updatePGDraftUI();
+        };
+
+        document.getElementById('btn-pg-back').onclick = () => {
+            document.getElementById('screen-pg-map').classList.add('hidden');
+            document.getElementById('screen-hub').classList.remove('hidden');
+        };
+
+        document.getElementById('btn-pg-draft-back').onclick = () => {
+            document.getElementById('screen-pg-draft').classList.add('hidden');
+            document.getElementById('screen-hub').classList.remove('hidden');
+        };
+
+        document.getElementById('btn-pg-draft-start').onclick = () => {
+            startPGFromDraft();
+        };
+
+        document.getElementById('btn-enter-tourney').onclick = () => {
+            startTourney();
+        };
+
+        document.getElementById('btn-tourney-back').onclick = () => {
+            document.getElementById('screen-tourney').classList.add('hidden');
+            document.getElementById('screen-hub').classList.remove('hidden');
+        };
+
+        document.getElementById('btn-spectate-back').onclick = () => {
+            stopSpectate();
         };
 
         await buildRoster();
@@ -791,7 +1371,7 @@ function showEnergyModal(payment) {
             document.getElementById('btn-start').disabled = true;
             renderGrid();
         };
-        document.getElementById('btn-toggle-log').onclick = () => {
+        document.getElementById('btn-show-log').onclick = () => {
             document.getElementById('log-panel').classList.toggle('open');
         };
     } catch (err) {

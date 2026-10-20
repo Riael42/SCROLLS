@@ -24,6 +24,7 @@ h2 { font-size: 1.1em; margin: 1em 0 0.5em 0; color: #a8a8c0; }
 .char-card:hover { border-color: #5a5a8e; }
 .char-card.selected { border-color: #6aa8ff; background: #1a2040; }
 .char-card.filtered { opacity: 0.25; pointer-events: none; }
+.char-card.dead { opacity: 0.5; border-color: #4a1a1a; background: #2a1010; pointer-events: none; }
 .char-name { font-weight: bold; margin-bottom: 0.25em; }
 .char-badges { font-size: 0.75em; color: #888; margin-bottom: 0.4em; text-transform: uppercase; letter-spacing: 0.05em; }
 .char-hp { font-size: 0.85em; color: #a8a8c0; margin-bottom: 0.5em; }
@@ -45,7 +46,7 @@ h2 { font-size: 1.1em; margin: 1em 0 0.5em 0; color: #a8a8c0; }
     background: #0e0e1a; z-index: 10;
     display: flex; flex-direction: column;
 }
-.top-bar { display: flex; justify-content: space-between; padding: 0.5em 1em; background: #16162a; border-bottom: 1px solid #2a2a4a; font-family: monospace; font-size: 0.9em; flex-shrink: 0; }
+.top-bar { display: flex; justify-content: space-between; align-items: center; padding: 0.5em 1em; background: #16162a; border-bottom: 1px solid #2a2a4a; font-family: monospace; font-size: 0.9em; flex-shrink: 0; }
 .energy-pool { display: flex; gap: 0.8em; }
 .energy-pool span { color: #a8a8c0; }
 .combat-main { display: flex; flex: 1; overflow: hidden; padding: 0.5em 1em; }
@@ -122,7 +123,7 @@ h2 { font-size: 1.1em; margin: 1em 0 0.5em 0; color: #a8a8c0; }
 .combat-controls button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Combat log slide-out panel */
-.log-btn { position: absolute; right: 10px; top: 10px; z-index: 60; }
+.log-btn { right: 10px; top: 10px; z-index: 60; }
 .log-panel {
     position: absolute; right: 0; top: 50px; bottom: 100px; width: 300px;
     background: rgba(22, 22, 42, 0.95); border-left: 1px solid #444;
@@ -273,3 +274,8 @@ h2 { font-size: 1.1em; margin: 1em 0 0.5em 0; color: #a8a8c0; }
 .hub-stats { display: flex; gap: 2em; margin: 2em 0; font-family: monospace; font-size: 1.1em; }
 .hub-stats div { color: #a8a8c0; }
 .hub-stats span { color: #6aa8ff; font-weight: bold; }
+
+/* Proving Grounds map screen */
+.pg-stats { display: flex; gap: 2em; margin: 2em 0; font-family: monospace; font-size: 1.1em; }
+.pg-stats div { color: #a8a8c0; }
+.pg-stats span { color: #6aa8ff; font-weight: bold; }
