@@ -25,6 +25,15 @@
     <button id="btn-tourney-back" style="font-size:1em; padding:0.6em 1.2em; margin-top:1.5em;">Return to Hub</button>
 </div>
 
+<div id="screen-tourney-draft" class="screen hidden">
+    <h1>Tournament — 3-Man Draft</h1>
+    <div id="tourney-draft-info" style="margin-bottom:1em; font-family: monospace;"></div>
+    <div id="tourney-draft-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75em; margin-bottom: 1em;"></div>
+    <div id="tourney-draft-selected" style="margin-bottom:1em; font-family: monospace;"></div>
+    <button id="btn-tourney-draft-start" class="primary" style="font-size:1.1em; padding:0.8em 1.5em; margin-top:1em;" disabled>Start Tournament</button>
+    <button id="btn-tourney-draft-back" style="font-size:1em; padding:0.6em 1.2em; margin-top:1em;">Return to Hub</button>
+</div>
+
 <div id="screen-pg-draft" class="screen hidden">
     <h1>Proving Grounds — 5-Man Draft</h1>
     <div id="pg-draft-info" style="margin-bottom:1em; font-family: monospace;"></div>
@@ -334,6 +343,65 @@ function startPGFromDraft() {
     document.getElementById('screen-pg-map').classList.remove('hidden');
     state.pgMode = true;
     updatePGMapUI();
+}
+
+let tourneyDraft = [];
+
+function toggleTourneySelect(id) {
+    const idx = tourneyDraft.indexOf(id);
+    if (idx >= 0) tourneyDraft.splice(idx, 1);
+    else if (tourneyDraft.length < 3) tourneyDraft.push(id);
+    updateTourneyDraftUI();
+}
+
+function updateTourneyDraftUI() {
+    const M = state.module;
+    const json = M.ccall('sw_meta_get_state', 'string', [], []);
+    const s = JSON.parse(json);
+    const debugMode = s.debug_mode === 1;
+
+    const grid = document.getElementById('tourney-draft-grid');
+    grid.innerHTML = '';
+    for (const ch of state.roster) {
+        if (!debugMode && (!s.unlocked || s.unlocked[ch.id] === 0)) continue;
+        const card = document.createElement('div');
+        card.className = 'char-card';
+        if (tourneyDraft.includes(ch.id)) card.classList.add('selected');
+        card.onclick = () => toggleTourneySelect(ch.id);
+
+        const abilitiesHtml = ch.abilities.map(a =>
+            `<div class="ability"><span>${a.name}</span><span class="cost">${fmtCost(a.cost)}</span></div>`
+        ).join('');
+
+        card.innerHTML = `
+            <div class="char-name">${ch.name}</div>
+            <div class="char-badges">${ROLE_NAMES[ch.role]} · ${ch.flavorName}</div>
+            <div class="char-hp">${ch.hp} HP</div>
+            <div class="char-abilities">${abilitiesHtml}</div>
+        `;
+        grid.appendChild(card);
+    }
+
+    const info = document.getElementById('tourney-draft-info');
+    info.textContent = `Select 3 characters for your Tournament team.`;
+
+    const sel = document.getElementById('tourney-draft-selected');
+    sel.textContent = `Selected: ${tourneyDraft.length} / 3`;
+
+    const btn = document.getElementById('btn-tourney-draft-start');
+    btn.disabled = tourneyDraft.length !== 3;
+}
+
+function startTourneyFromDraft() {
+    const M = state.module;
+    const ids = tourneyDraft;
+    M.ccall('sw_meta_action', 'number',
+        ['number','number','number','number','number','number'],
+        [101, ids[0], ids[1], ids[2], 0, 0]);
+    document.getElementById('screen-tourney-draft').classList.add('hidden');
+    document.getElementById('screen-tourney').classList.remove('hidden');
+    state.tourneyMode = true;
+    renderTourneyBracket();
 }
 
 function updatePGMapUI() {
@@ -648,8 +716,8 @@ function renderTourneyBracket() {
         match.style.padding = '0.5em';
         match.style.borderRadius = '4px';
         match.style.minWidth = '200px';
-        const aname = names[a]?.name || '?';
-        const bname = names[b]?.name || '?';
+        const aname = names[a]?.name || 'Unknown Trainer';
+        const bname = names[b]?.name || 'Unknown Trainer';
         const aAlive = alive[a] ? '' : ' (DEFEATED)';
         const bAlive = alive[b] ? '' : ' (DEFEATED)';
         const isPlayerA = a === t.player_slot;
@@ -700,11 +768,12 @@ function renderTourneyBracket() {
             const btn = document.getElementById(`tourney-spec-${a}-${b}`);
             if (btn) {
                 btn.onclick = () => {
-                    // For AI matches, we don't have a recorded replay yet;
-                    // simulate by running a headless match isn't possible from JS.
-                    // Instead, show a message.
-                    document.getElementById('spectate-info').textContent = 'AI match replay not yet recorded.';
-                    stopSpectate();
+                    const opponentIdx = a; // could be either since both are AI
+                    const opponent = t.trainers[opponentIdx];
+                    document.getElementById('screen-tourney').classList.add('hidden');
+                    document.getElementById('screen-spectate').classList.remove('hidden');
+                    document.getElementById('spectate-info').textContent = `Spectating ${opponent.name}... (Replay data not available yet)`;
+                    state.tourneyMode = true;
                 };
             }
         }
@@ -887,7 +956,7 @@ function renderTeam(side, containerId, isPlayer) {
                 
                 port.onmouseenter = () => {
                     const dmg = state.module.ccall('sw_preview_damage', 'number', 
-                        ['number','number','number'], [ab.side, ab.charIdx, ab.slotIdx]);
+                        ['number','number','number','number','number'], [ab.side, ab.charIdx, ab.slotIdx, side, i]);
                     
                     if (dmg > 0) {
                         const shieldDmg = Math.min(dmg, shieldAmt);
@@ -919,6 +988,13 @@ function renderTeam(side, containerId, isPlayer) {
                         if (hpBar) hpBar.style.width = `${newHpPct}%`;
                         if (shieldBar) shieldBar.style.width = `${newShieldPct}%`;
                         if (hpText) hpText.textContent = `${newHpAmt}${newShieldAmt > 0 ? ` (+${newShieldAmt})` : ''} / ${c.hp_max}`;
+                    } else if (c.invuln_turns > 0) {
+                        document.getElementById('combat-info').innerHTML = `
+                            <div class="content">
+                                <strong>${ab.abilityObj.name}</strong> → <strong>${c.name}</strong><br>
+                                <strong style="color:#f88">BLOCKED (Invulnerable)</strong>
+                            </div>
+                        `;
                     }
                 };
                 
@@ -1104,7 +1180,7 @@ function updateCombatUI() {
 
         const restartBtn = document.getElementById('btn-restart');
         if (s.winner === 0) {
-            restartBtn.textContent = state.pgMode ? 'Return to Map' : 'Claim Reward & Return to Hub';
+            restartBtn.textContent = state.pgMode ? 'Return to Map' : (state.tourneyMode ? 'Next Round' : 'Claim Reward & Return to Hub');
             restartBtn.onclick = () => {
                 if (state.pgMode) {
                     const M = state.module;
@@ -1115,6 +1191,30 @@ function updateCombatUI() {
                     state.pgMode = false;
                     state.matchActive = false;
                     updatePGMapUI();
+                    return;
+                }
+                if (state.tourneyMode) {
+                    const M = state.module;
+                    const winner = s.winner;
+                    M.ccall('sw_meta_action', 'number', ['number','number','number','number','number','number'], [104, winner, 0, 0, 0, 0]);
+                    const freshJson = M.ccall('sw_meta_get_state', 'string', [], []);
+                    const freshState = JSON.parse(freshJson);
+                    if (freshState.current_state === 0) { // META_STATE_HUB
+                        // Tournament finished (won or lost)
+                        document.getElementById('end-screen').classList.add('hidden');
+                        document.getElementById('screen-combat').classList.add('hidden');
+                        document.getElementById('screen-tourney').classList.add('hidden');
+                        document.getElementById('screen-hub').classList.remove('hidden');
+                        state.tourneyMode = false;
+                        state.matchActive = false;
+                        updateHubUI();
+                    } else {
+                        // Advance to next round
+                        document.getElementById('end-screen').classList.add('hidden');
+                        document.getElementById('screen-combat').classList.add('hidden');
+                        document.getElementById('screen-tourney').classList.remove('hidden');
+                        renderTourneyBracket();
+                    }
                     return;
                 }
                 const types = ['day', 'night', 'dawn', 'dusk'];
@@ -1128,7 +1228,7 @@ function updateCombatUI() {
                 document.getElementById('screen-hub').classList.remove('hidden');
             };
         } else {
-            restartBtn.textContent = state.pgMode ? 'Return to Map' : 'Return to Select';
+            restartBtn.textContent = state.pgMode ? 'Return to Map' : (state.tourneyMode ? 'Return to Hub' : 'Return to Select');
             restartBtn.onclick = () => {
                 if (state.pgMode) {
                     document.getElementById('end-screen').classList.add('hidden');
@@ -1137,6 +1237,19 @@ function updateCombatUI() {
                     state.pgMode = false;
                     state.matchActive = false;
                     updatePGMapUI();
+                    return;
+                }
+                if (state.tourneyMode) {
+                    const M = state.module;
+                    const winner = s.winner;
+                    M.ccall('sw_meta_action', 'number', ['number','number','number','number','number','number'], [104, winner, 0, 0, 0, 0]);
+                    document.getElementById('end-screen').classList.add('hidden');
+                    document.getElementById('screen-combat').classList.add('hidden');
+                    document.getElementById('screen-tourney').classList.add('hidden');
+                    document.getElementById('screen-hub').classList.remove('hidden');
+                    state.tourneyMode = false;
+                    state.matchActive = false;
+                    updateHubUI();
                     return;
                 }
                 document.getElementById('end-screen').classList.add('hidden');
@@ -1155,10 +1268,16 @@ function updateCombatUI() {
     if (s.active === 0) {
         endBtn.disabled = false;
         endBtn.textContent = 'End Turn';
+        document.getElementById('team-player').style.opacity = '1';
+        document.getElementById('team-enemy').style.opacity = '1';
     } else {
         endBtn.disabled = true;
         endBtn.textContent = 'Enemy Thinking...';
-        setTimeout(() => {
+        document.getElementById('team-player').style.opacity = '0.5';
+        document.getElementById('team-enemy').style.opacity = '0.5';
+        
+        if (window.aiTurnTimeout) clearTimeout(window.aiTurnTimeout);
+        window.aiTurnTimeout = setTimeout(() => {
             state.module.ccall('sw_ai_turn', 'number', [], []);
             updateCombatUI();
         }, 800);
@@ -1330,12 +1449,24 @@ function showEnergyModal(payment) {
         };
 
         document.getElementById('btn-enter-tourney').onclick = () => {
-            startTourney();
+            document.getElementById('screen-hub').classList.add('hidden');
+            document.getElementById('screen-tourney-draft').classList.remove('hidden');
+            tourneyDraft = [];
+            updateTourneyDraftUI();
         };
 
         document.getElementById('btn-tourney-back').onclick = () => {
             document.getElementById('screen-tourney').classList.add('hidden');
             document.getElementById('screen-hub').classList.remove('hidden');
+        };
+
+        document.getElementById('btn-tourney-draft-back').onclick = () => {
+            document.getElementById('screen-tourney-draft').classList.add('hidden');
+            document.getElementById('screen-hub').classList.remove('hidden');
+        };
+
+        document.getElementById('btn-tourney-draft-start').onclick = () => {
+            startTourneyFromDraft();
         };
 
         document.getElementById('btn-spectate-back').onclick = () => {
